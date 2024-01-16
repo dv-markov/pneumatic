@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+
+<meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+<meta content="utf-8" http-equiv="encoding">
+
+<link rel="stylesheet" href="include/style.css"> 
+<script type="text/javascript" src="include/specs.js"></script>
+<script type="text/javascript">
+	unit_sys = 0;
+	inputs_unit_map = {
+		'f_push': ['N', 'lbf'],
+		'f_pull': ['N', 'lbf'],
+		'v_endstop': ['mm/s', 'in/s'],
+		'E_endstop': ['J', 'ft-lbf'],
+		'air_cons': ['g', 'lbm'],
+
+		'mass': ['kg', 'lbm'],
+		'load': ['N', 'lbf'],
+		'stroke': ['mm', 'in'],
+		'd_rod': ['mm', 'in'],
+		'd_bore': ['mm', 'in'],
+		'l_line': ['m', 'ft'],
+		'd_line': ['mm', 'in'],
+		'T_src': ['C', 'C'],
+		'P_src': ['kPa', 'psi'],
+
+		'query_d': ['mm', 'in'],
+		'query_v': ['mm/s', 'in/s'],
+		'query_p': ['kPa', 'psi'],
+		'query_f': ['N', 'lbf']
+	}
+
+	function populate_units() {
+		if(document.getElementById('unit_metric').checked)
+			unit_sys = 0;
+		else 
+			unit_sys = 1;
+
+		unit_labels = document.getElementsByClassName('unit');
+		for (unit in unit_labels) {
+			if (unit_labels[unit].id && inputs_unit_map[unit_labels[unit].id.substring(5)] ){
+				varname = unit_labels[unit].id.substring(5);
+				document.getElementById('unit_'+varname).innerHTML = '['+inputs_unit_map[varname][unit_sys]+']';
+			}
+		}
+
+		document.getElementById(chart_name+'_d_label').innerHTML = 'Position ['+inputs_unit_map['query_d'][unit_sys]+']';
+		document.getElementById(chart_name+'_p_label').innerHTML = 'Pressure ['+inputs_unit_map['query_p'][unit_sys]+']';
+	}
+
+	function switch_units() {
+		populate_units();
+		compute();
+	}
+
+	var poschart = null, poschart_options = null;
+
+    function populate_direction() {
+    	document.getElementById('direction_push').disabled = direction_push;
+    	document.getElementById('direction_pull').disabled = !direction_push;
+    }
+
+    direction_push = true;
+    function setDirection(push) {
+    	direction_push = push;
+    	populate_direction();
+
+    	compute(true);
+    }
+
+	function get_motor_data(motor,key){
+		return motor_data[motor][key];
+	}
+
+	function gidv(id) {
+
+		v =  eval(document.getElementById(id).value);
+		if (typeof inputs_unit_map[id] !== 'undefined')
+			v = convert(v, inputs_unit_map[id][unit_sys]);
+		return v;
+	}
+
+	function gids(id, value, places) {
+		if (typeof places === 'undefined')
+			places = 3;
+		if (typeof value === 'string') {
+			document.getElementById(id).value = value;
+		} else {
+			if (typeof inputs_unit_map[id] !== 'undefined')
+				value = convert_to(value, inputs_unit_map[id][unit_sys]);
+			document.getElementById(id).value = value.toFixed(places);
+		}
+	}
+
+	function thload() {
+		if(packed_inputs) unpack_inputs();
+		populate_units();
+		populate_direction();
+		
+
+		var inputs, index;
+
+		inputs = document.getElementsByTagName('input');
+		for (index = 0; index < inputs.length; ++index) {
+		    inputs[index].onkeyup = function(e) {
+		    	var key = e.keyCode ? e.keyCode : e.which;
+
+		    	if (key==13) {
+		    		compute(true);
+		    	} else {
+		    		compute(false);
+		    	}
+		    }
+		}
+
+		compute(true);
+	}
+
+		
+	function sign(x) {
+		if (x>0) return 1;
+		if (x<0) return -1;
+		return 0;
+	}
+
+	en_vm = true;
+
+	function compute(simulate) {
+		simulate = typeof simulate !== 'undefined' ? simulate : true;
+
+		document.getElementById('charts').classList.add('uncomputed');
+      	document.getElementById('t_endstop').classList.add('uncomputed');
+      	document.getElementById('t_steady').classList.add('uncomputed');
+      	document.getElementById('v_endstop').classList.add('uncomputed');
+      	document.getElementById('E_endstop').classList.add('uncomputed');
+      	document.getElementById('air_cons').classList.add('uncomputed');
+
+		// Constants
+		dt = 0.0005; // s
+		P_atm = 101e3; // Pa
+		R = 287.05; // J/kg-K
+		c_p = 1010; // J/kg-K
+		c_v = c_p - R;
+
+		// Variables
+		T_in = gidv('T_src') + 273; // K
+		P_in = gidv('P_src')+P_atm; //Pa; 60psi (conversion between gague and abs pressure)
+		A_push = Math.pow(gidv('d_bore'),2)*Math.PI/4;
+		A_pull = A_push - Math.pow(gidv('d_rod'),2)*Math.PI/4
+		A = direction_push ? A_push : A_pull; // m^2
+		xf = gidv('stroke'); // m
+		
+		d_line = gidv('d_line');
+		l_line = gidv('l_line');
+		V_extra = Math.PI/4*Math.pow(d_line,2)*l_line;
+		M = gidv('mass'); // kg
+
+		F_push = (P_in-P_atm)*A_push;
+		F_pull = (P_in-P_atm)*A_pull;
+		gids("f_push", F_push);
+		gids("f_pull", F_pull);
+
+
+		// State variables (autocomputed)
+		t = 0;
+		T_s = T_in;
+		x = 0;
+		v = 0;
+		m_s = P_atm*V_extra/R/T_s; // rho = 1.2 kg/m^3
+
+		if(!simulate) return;
+
+      	i=0;
+
+      	t_endstop = NaN;
+      	v_endstop = NaN;
+      	E_endstop = NaN;
+      	t_ss	  = NaN;
+      	air_cons  = 0;
+
+      	termcrit = document.getElementById('termcrit').value;
+      	if (termcrit == '') termcrit = 0;
+
+      	channels = [[0],[0],[0],[0],[0]];
+
+		while(i<3000) {
+			P_s = m_s/(x*A+V_extra)*R*T_s;
+			V_in = sign(P_in-P_s)*0.0197862*Math.pow(Math.pow(d_line,5)*(P_in-P_atm)*Math.abs(P_in-P_s)/l_line, 20/37); //magical equation
+			m_in = P_in/R/T_in*V_in;
+
+			F = convert(eval(document.getElementById('load').value), inputs_unit_map['load'][unit_sys]);
+
+			vmterm = en_vm ? Math.pow(V_in/(Math.PI/4 * d_line*d_line), 2) : 0;
+
+			dT_s = ( m_in * (-c_p*T_s + c_v*T_in + vmterm) - P_s*A*v)/c_p/m_s;
+			dm_s = m_in;
+
+			dx = v;
+			dv = ((P_s-P_atm)*A-F) / M;
+
+			t += dt;
+			x += dx*dt;
+			v += dv*dt;
+			air_cons += m_in*dt;
+			if (x <= 0) {x = 0; v = Math.max(v,0);}
+			if (x >= xf) {
+				if (isNaN(t_endstop)) {
+					t_endstop = t;
+					v_endstop = v;
+					E_endstop = M*v*v/2;
+				}
+				x = xf; v = 0;
+			}
+			T_s += dT_s*dt;
+			m_s += dm_s*dt;
+
+			if (x >= xf && P_s >= P_in*0.99) {
+				if (isNaN(t_endstop)) {
+					t_endstop = t;
+					v_endstop = v;
+					E_endstop = M*v*v/2;
+				}
+				t_ss = t;
+				break;
+			}
+
+			if (eval(termcrit)) break;
+
+			channels[0].push(t);
+			channels[1].push(x);
+			channels[2].push(P_s-P_atm);
+			channels[3].push(v);
+			channels[4].push((P_s-P_atm)*A);
+			i++;
+		}
+		drawchart(channels);
+
+      	//xchart.draw(xdata, xchart_options);
+      	document.getElementById('charts').classList.remove('uncomputed');
+      	document.getElementById('t_endstop').classList.remove('uncomputed');
+      	document.getElementById('t_steady').classList.remove('uncomputed');
+      	document.getElementById('v_endstop').classList.remove('uncomputed');
+      	document.getElementById('E_endstop').classList.remove('uncomputed');
+      	document.getElementById('air_cons').classList.remove('uncomputed');
+      	gids('t_endstop', NaNToerr(t_endstop));
+      	gids('t_steady',  NaNToerr(t_ss));
+      	gids('v_endstop', NaNToerr(v_endstop));
+      	gids('E_endstop', NaNToerr(E_endstop));
+      	gids('air_cons',  air_cons);
+	}
+
+</script>
+
+
+<script style="text/javascript" >
+	function makeTicks(maxes, num_to_print, n) {
+		if (Math.min(maxes) < 0) return [0];
+		H = [];
+		bases = [];
+		for(var i=0; i<maxes.length; i++){
+			h = maxes[i]/n;
+			base = Math.floor(Math.log10(h)-Math.log10(5));
+			bases.push(base);
+			H.push(Math.round(h/Math.pow(10, base))*Math.pow(10, base));
+		}
+
+		ticks = [];
+		ticksstr = [];
+		alive = true;
+		for(var i=0; alive; i++) {
+			alive = false;
+			labelstr = '';
+			for(var j=0; j<maxes.length; j++) {
+				if (j<num_to_print) {
+					if (ticks.length <= j+1)
+						ticks.push([]);
+					ticks[j].push(H[j]*i);
+					labelstr += (H[j]*i).toFixed(bases[j] > 0 ? 0:-bases[j]);
+					if (j != num_to_print-1)
+						labelstr += ' / ';
+				}
+				if (H[j]*(i) < maxes[j])
+					alive = true;
+			}
+			ticksstr.push(labelstr);
+			
+		}
+		return [ticks, ticksstr];
+	}
+
+	function sign(x) {
+		if(x>0) return 1;
+		if(x<0) return -1;
+		return 0;
+	}
+
+	chart_name = 'chart';
+
+	function drawTicks(axis, ticklabels, ff, f0, gf, g0, marg) {
+		altaxis = axis == 'x' ? 'y':'x';
+		realaxis = axis == 'z' ? 'y':axis;
+		xgrid = document.getElementById(chart_name+'_'+axis+'_grid');
+		while(xgrid.firstChild) xgrid.removeChild(xgrid.firstChild);
+
+		labels = document.getElementById(chart_name+'_'+axis+'_axis_labels');
+		while(labels.firstChild) labels.removeChild(labels.firstChild);
+
+		gfl = (axis=='z'?gf:g0) + (axis=='y'?-1:1)*marg;
+
+		for (i in ticklabels) {
+			line = document.createElementNS('http://www.w3.org/2000/svg','line');
+			line.setAttribute(altaxis+'1', gf); line.setAttribute(altaxis+'2', g0);
+			fp = f0 + (ff-f0)*(i/(ticklabels.length-1));
+			line.setAttribute(realaxis+'1', fp);
+			line.setAttribute(realaxis+'2', fp);
+			line.setAttribute('class', 'grid');
+			xgrid.append(line);
+
+			label = document.createElementNS('http://www.w3.org/2000/svg','text');
+			label.setAttribute(altaxis, gfl);
+			label.setAttribute(realaxis, fp);
+			label.innerHTML = i==0 ? '0' : ticklabels[i];
+			labels.append(label);
+		}
+	}
+
+	function linterp(xs, ys, xq) {
+		i;
+		for (i=1; i<xs.length-1 && !isNaN(xs[i]) && xq>xs[i]; i++) {}
+		return ys[i-1] + (ys[i]-ys[i-1])/(xs[i]-xs[i-1])*(xq-xs[i-1]);
+	}
+
+	function drawchart() {
+		[t, d, p, v, f] = channels;
+
+		dc = convert_to(d, inputs_unit_map['query_d'][unit_sys]);
+		pc = convert_to(p, inputs_unit_map['query_p'][unit_sys]);
+
+		svg = document.getElementById('chart');
+		x_axis = document.getElementById('chart_x_axis');
+		y_axis = document.getElementById('chart_y_axis');
+
+		x0 = Math.min(y_axis.x1.baseVal.value, y_axis.x2.baseVal.value);
+		xf = Math.max(y_axis.x1.baseVal.value, y_axis.x2.baseVal.value);
+		y0 = Math.max(x_axis.y1.baseVal.value, x_axis.y2.baseVal.value);
+		yf = Math.min(x_axis.y1.baseVal.value, x_axis.y2.baseVal.value);
+
+		d_line = document.getElementById('chart_d_line');
+		p_line = document.getElementById('chart_p_line');
+		d_line.setAttribute("points",""); 
+		p_line.setAttribute("points",""); 
+
+		[[t_ticks], xticklabels] = makeTicks([Math.max(...t)], 1, 9);
+		[[d_ticks], yticklabels] = makeTicks([Math.max(...dc), Math.max(...pc)], 1, 6);
+		[[p_ticks], zticklabels] = makeTicks([Math.max(...pc), Math.max(...dc)], 1, 6);
+		
+		t_max = t_ticks[t_ticks.length-1];
+		d_max = d_ticks[d_ticks.length-1];
+		p_max = p_ticks[p_ticks.length-1];
+
+		drawTicks('x', xticklabels, xf, x0, yf, y0, 15);
+		drawTicks('y', yticklabels, yf, y0, xf, x0, 5);
+		drawTicks('z', zticklabels, yf, y0, xf, x0, 5);
+
+		for (i in t) {
+			var ptd = svg.createSVGPoint();
+			var ptp = svg.createSVGPoint();
+
+			xq = x0 + (xf-x0)/(t_max-0)*t[i];
+			ptd.x = ptp.x = xq;
+
+			ptd.y   = y0 + (yf-y0)/(d_max-0)*dc[i];
+			ptp.y   = y0 + (yf-y0)/(p_max-0)*pc[i];
+			d_line.points.appendItem(ptd);
+			p_line.points.appendItem(ptp);
+		}
+		
+		
+		bg=document.getElementById('chart');
+
+		qline = document.getElementById('chart_query_line');
+		qline.setAttribute('opacity', 0);
+
+		gids('query_t', '-');
+		gids('query_d', '-');
+		gids('query_v', '-');
+		gids('query_p', '-');
+		gids('query_f', '-');
+
+		handler = function(event){
+			if(event.buttons != 1) return;
+				xq = event.clientX - bg.getBoundingClientRect().left;
+				yq = event.clientY - bg.getBoundingClientRect().top;
+
+				tq = (t_max-0)/(xf-x0)*(xq-x0);
+				if (tq>Math.max(...t)){
+					tq = Math.max(...t);
+					xq = x0 + (xf-x0)/(t_max-0)*tq;
+				}
+				if (tq<0) {
+					tq=0; xq=x0;
+				}
+				dq   = linterp(t, d, tq);
+				vq   = linterp(t, v, tq);
+				pq   = linterp(t, p, tq);
+				fq   = linterp(t, f, tq);
+				qline.setAttribute('opacity', 1);
+
+				qline.setAttribute('x1', xq);
+				qline.setAttribute('x2', xq);
+
+				gids('query_t', tq);
+				gids('query_d', dq);
+				gids('query_v', vq);
+				gids('query_p', pq);
+				gids('query_f', fq);
+			}
+		bg.addEventListener('mousemove', handler);
+		bg.addEventListener('mousedown', handler);
+	}
+
+</script>
+
+<script id="packed_inputs_dump">
+	packed_inputs = null; // set to an object/dict (id => value) with some specials
+	// unit_sys
+</script>
+
+<script>
+	function pack_inputs() {
+		packed_inputs = {};
+		packed_inputs.direction_push = direction_push;
+		for (input of document.getElementsByTagName('input')) {
+			if (input.type == "text") {
+				packed_inputs[input.id] = input.value;
+			}
+			if (input.type == "checkbox" || input.type == "radio") {
+				packed_inputs[input.id] = input.checked;
+			}
+		}
+		for (input of document.getElementsByTagName('select')) {
+			packed_inputs[input.id] = input.value;
+		}
+
+		document.getElementById("packed_inputs_dump").innerHTML = "packed_inputs="+JSON.stringify(packed_inputs)+";";
+	}
+
+	function unpack_inputs() {
+		direction_push = packed_inputs.direction_push;
+		delete packed_inputs.direction_push;
+		populate_direction();
+		for (key in packed_inputs) {
+			if (typeof packed_inputs[key] == "boolean")
+				document.getElementById(key).checked = packed_inputs[key];
+			else
+				document.getElementById(key).value   = packed_inputs[key];
+		}
+
+		loads = document.getElementsByClassName('load');
+		for (load of loads) {
+			load.identifier = load.firstChild.getAttribute('identifier');
+		}
+	}
+
+	function readTextFile(file)
+	{
+		var allText = null;
+	    var rawFile = new XMLHttpRequest();
+	    rawFile.open("GET", file, false);
+	    rawFile.onreadystatechange = function ()
+	    {
+	        if(rawFile.readyState === 4)
+	        {
+	            if(rawFile.status === 200 || rawFile.status == 0)
+	            {
+	                allText = rawFile.responseText;
+	            }
+	        }
+	    }
+	    rawFile.send(null);
+	    return allText;
+	}
+
+	if (!String.prototype.decodeHTML) {
+	  String.prototype.decodeHTML = function () {
+	    return this.replace(/&apos;/g, "'")
+	               .replace(/&quot;/g, '"')
+	               .replace(/&gt;/g, '>')
+	               .replace(/&lt;/g, '<')
+	               .replace(/&amp;/g, '&')
+	               .replace(/â–¼/g, '&#9650;');
+	  };
+	}
+
+	months=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+	function download_page() {
+		today = new Date();
+		var fileName = 'pneucyl_' + today.getFullYear()+months[today.getMonth()]+today.getDate();
+		fileName = prompt("Enter a filename. (.html will be appended)", fileName)
+		if (!fileName) return;
+		document.getElementById('topbar_fname').innerHTML = fileName;
+		fileName += '.html';
+
+
+		head = document.head || document.getElementsByTagName('head')[0];
+
+		pack_inputs();
+
+		scripts   = document.getElementsByTagName('script');
+		for (script of scripts) {
+			if (script.src) {
+				scr = readTextFile(script.src);
+				script.innerHTML = scr;
+				script.removeAttribute('src');
+			}
+		}
+
+		links = document.getElementsByTagName('link');
+		for (link of links) {
+			if (link.href) {
+				scr = readTextFile(link.href);
+				style = document.createElement('style');
+				style.type='text/css';
+				if(style.styleSheet) {
+					style.styleSheet.cssText = scr;
+				} else {
+					style.appendChild(document.createTextNode(scr));
+				}
+				head.prepend(style);
+				link.parentElement.removeChild(link);
+			}
+		}
+
+
+		var fileContent = new XMLSerializer().serializeToString(document).decodeHTML();
+		var myFile = new Blob([fileContent], {type: 'text/html'});
+		window.URL = window.URL || window.webkitURL;
+		dlurl = window.URL.createObjectURL(myFile);
+		document.getElementById('download_iframe').download = fileName;
+		document.getElementById('download_iframe').href = dlurl;
+		document.getElementById('download_iframe').click();
+	}
+
+	function print_page() {
+		window.print();
+	}
+</script>
+
+
+<html>
+<body onload="thload()">
+<div id="topbar">
+	<div class="topbar_la selectable" onclick="window.location='./'">EveryCalc</div>
+	<div class="topbar_la" id='topbar_version'></div>
+	<div class="topbar_la" id='topbar_fname'></div>
+	<div class="topbar_ctr">Pneumatic Cylinder Calculator</div>
+	<div class="topbar_ra selectable" onclick="download_page();" id="download">Export HTML</div>
+	<div class="topbar_ra selectable" onclick="print_page();">Print</div>
+	<a id="download_iframe" hidden></a>
+</div>
+	<div style="width: 310px; float: left;" class="container">
+		<div class="even">
+		<center>
+			  <input type="radio" id="unit_english" name="unit" value="english" onclick="switch_units()">
+			  <label for="english">English</label>
+			  <input type="radio" id="unit_metric" name="unit" value="metric" onclick="switch_units()" checked>
+			  <label for="metric">Metric</label>
+		</center>
+		</div>
+
+		<div class="odd">
+		<table>
+			<tr>
+				<th class='rowlabel'>Tank Pressure</th>
+				<td><input id='P_src' value=400></td>
+				<td class='unit' id='unit_P_src'></td>
+			</tr><tr>
+				<th class="rowlabel">Tank Temperature</th>
+				<td><input id="T_src" value=20></td>
+				<td class="unit" id='unit_T_src'></td>
+			</tr><tr>
+				<th class='rowlabel'>Line Diameter</th>
+				<td><input id='d_line' value=5></td>
+				<td class="unit" id='unit_d_line'></td>
+			</tr><tr>
+				<th class="rowlabel">Line Length</th>
+				<td><input id="l_line" value=1.5></td>
+				<td class="unit" id='unit_l_line'></td>
+			</tr><tr>
+				<th class="rowlabel">Bore Diameter</th>
+				<td><input id="d_bore" value=20></td>
+				<td class="unit" id='unit_d_bore'></td>
+			</tr><tr>
+				<th class="rowlabel">Rod Diameter</th>
+				<td><input id="d_rod" value=6></td>
+				<td class="unit" id='unit_d_rod'></td>
+			</tr><tr>
+				<th class="rowlabel">Direction</th>
+				<td colspan=2><button id="direction_push" onclick="setDirection(true)" readonly >PUSH</button>
+					<button id="direction_pull" onclick="setDirection(false)" >PULL</button></td>
+			</tr><tr>
+				<th class="rowlabel">Stroke</th>
+				<td><input id="stroke" value=100></td>
+				<td class="unit" id='unit_stroke'></td>
+			</tr><tr>
+				<th class="rowlabel">Load</th>
+				<td><input id="load" value=50></td>
+				<td class="unit" id='unit_load'></td>
+			</tr><tr>
+				<th class="rowlabel">Mass</th>
+				<td><input id="mass" value=0.7></td>
+				<td class="unit" id='unit_mass'></td>
+			</tr><tr>
+				<th class="rowlabel">Alt. Termination Crit</th>
+				<td><input id="termcrit" value=''></td>
+			</tr>
+		</table>
+		<center><button type="button" onclick="compute()">Compute!</button></center>
+		</div><div class="output">
+			<table>
+				<tr>
+					<th class='rowlabel'>Force (Push)<span class="ttt">Push force of the cylinder at steady-state (not considering any external load)</span></th>
+					<td><input id='f_push' readonly /></td>
+					<td class='unit' id='unit_f_push'></td>
+				</tr><tr>
+					<th class='rowlabel'>Force (Pull)<span class="ttt">Pull force of the cylinder at steady-state (not considering any external load)</span></th>
+					<td><input id='f_pull' readonly /></td>
+					<td class='unit' id='unit_f_pull'></td>
+				</tr><tr>
+					<th class='rowlabel'>Time to Endstop</th>
+					<td><input id='t_endstop' readonly /></td>
+					<td class='unit'>[s]</td>
+				</tr><tr>
+					<th class='rowlabel'>Time to Steady-State</th>
+					<td><input id='t_steady' readonly /></td>
+					<td class='unit'>[s]</td>
+				</tr><tr>
+					<th class='rowlabel'>Velocity @ Endstop</th>
+					<td><input id='v_endstop' readonly /></td>
+					<td class='unit' id='unit_v_endstop'></td>
+				</tr><tr>
+					<th class='rowlabel'>Kinetic En. @ Endstop</th>
+					<td><input id='E_endstop' readonly /></td>
+					<td class='unit' id='unit_E_endstop'></td>
+				</tr><tr>
+					<th class='rowlabel'>Air Consumption</th>
+					<td><input id='air_cons' readonly /></td>
+					<td class='unit' id='unit_air_cons'></td>
+				</tr>
+			</table>
+		</div>
+	</div>
+
+
+<div style="margin-left: 0px;" class="container" id="charts">
+
+
+<svg version="1.2" class="graph" id='chart' aria-labelledby="title" role="img">
+  <title id="title">Position/Velocity Data</title>
+
+
+<rect class="background" id="chart_background" x=90 y=20 width=615 height=430 />
+<g class="x-grid">
+  <line id="chart_x_axis" class="axes" x1="90" x2="90" y1="20" y2="450"></line>
+</g>
+<g class="y-grid">
+  <line id="chart_y_axis" class="axes" x1="90" x2="705" y1=450 y2=450></line>
+  <line id="chart_z_axis" class="axes" x1="705" x2="705" y1="20" y2=450></line>
+</g>
+
+<g class="x-grid" id="chart_x_grid"></g>
+<g class="y-grid" id="chart_y_grid"></g>
+<g class="z-grid" id="chart_z_grid"></g>
+
+<g class="labels x-labels" id='chart_x_labels'>
+  <text x="375" y=485 class="label-title">Time [s]</text>
+</g>
+
+<g class="labels y-labels" id='chart_y_labels'>
+  <text x=-240 y=15 class="label-title" transform="rotate(270)" id="chart_d_label" fill="#0074d9">Position</text>
+</g>
+
+<g class="labels z-labels" id='chart_z_labels'>
+  <text x=-240 y=800 class="label-title" transform="rotate(270)" id="chart_p_label" fill="#d91200">Pressure</text>
+</g>
+
+<g class="labels x-labels" id='chart_x_axis_labels'></g>
+<g class="labels z-labels" id='chart_z_axis_labels'></g>
+<g class="labels y-labels" id='chart_y_axis_labels'></g>
+
+<g class="query-line">
+	<line id="chart_query_line" x1=100 x2=100 y1=15 y2=455></line>
+</g>
+<polyline
+	id='chart_d_line'
+	fill='none'
+	stroke='#0074d9'
+	stroke-width=2
+	points="
+	"/>
+<polyline
+	id='chart_p_line'
+	fill='none'
+	stroke='#d91200'
+	stroke-width=2
+	points="
+	"/>
+</svg>
+	
+<div class="output-graph">
+	<table>
+		<tr>
+			<th class="rowlabel">Queried Time</th>
+			<td><input id="query_t" readonly /></td>
+			<td class="unit">[s]</td>
+		</tr><tr>
+			<th class="rowlabel">Position</th>
+			<td><input id="query_d" readonly /></td>
+			<td class="unit" id="unit_query_d"></td>
+		</tr><tr>
+			<th class="rowlabel">Velocity</th>
+			<td><input id="query_v" readonly /></td>
+			<td class="unit" id="unit_query_v"></td>
+		</tr><tr>
+			<th class="rowlabel">Pressure</th>
+			<td><input id="query_p" readonly /></td>
+			<td class="unit" id="unit_query_p"></td>
+		</tr><tr>
+			<th class="rowlabel">Force</th>
+			<td><input id="query_f" readonly /></td>
+			<td class="unit" id="unit_query_f"></td>
+		</tr>
+	</table>
+</div>
+
+</div>
+</body>
+</html>
