@@ -79,9 +79,10 @@
 
 		    	if (key==13) {
 		    		compute(true);
-		    	} else {
-		    		compute(false);
-		    	}
+		    	} 
+				// else {
+		    	// 	compute(false);
+		    	// }
 		    }
 		}
 	}
@@ -144,6 +145,9 @@
 		actuator_da_torque = Math.round((P_in * A) * actuator_lever_length/1000);
 		document.getElementById("actuator_da_torque").value = actuator_da_torque;
 
+		F_valve_BTO = gidv('valve_torque_bto') / (actuator_lever_length/1000);
+		console.log(F_valve_BTO);
+
 		// State variables (autocomputed)
 		t = 0;
 		T_s = T_in;
@@ -178,14 +182,21 @@
 			m_in = P_in/R/T_in*V_in;
 
 			F = eval(document.getElementById('load').value); // N
-			//console.log(F);
+
+			relative_travel = x / xf;
+			valve_torque_factor = 1.5 * Math.pow(relative_travel, 2) - 1.75 * relative_travel + 1;
+			F_valve = F_valve_BTO * valve_torque_factor;
+			if (i%1000 == 0) {
+				console.log(relative_travel);
+				console.log(F_valve);
+			}
 
 			dT_s = (-c_p*T_s*m_in - P_s*A*v + m_in*c_v*T_in)/c_p/m_s;
 			dm_s = m_in;
 
 			dx = v;
 			// add-DM - friction force
-			F_static_friction = F;
+			F_static_friction = F + F_valve;
 			F_spring = eval(document.getElementById('spring_factor_force').value);
 			F_pressure_spring = (P_s-P_atm)*A - F_spring;
 			// F_delta = F_pressure_spring-F_static_friction;
@@ -272,7 +283,7 @@
 				<td class="unit">mm</td>
 			</tr><tr>
 				<th class="rowlabel">Load</th>
-				<td><input id="load" value="1000"></td>
+				<td><input id="load" value="500"></td>
 				<td class="unit">N</td>
 			</tr><tr>
 				<th class="rowlabel">Spring factor</th>
@@ -282,10 +293,10 @@
 				<th class="rowlabel">Piston+Rod Mass</th>
 				<td><input id="mass" value=10></td>
 				<td class="unit">kg</td>
-			<!-- </tr><tr>
+			</tr><tr>
 				<th class="rowlabel">Valve torque BTO</th>
 				<td><input id="valve_torque_bto" value=330></td>
-				<td class="unit">Nm</td> -->
+				<td class="unit">Nm</td>
 			</tr>
 				<th class="rowlabel">Stats</th>
 			</tr><tr>
@@ -297,11 +308,11 @@
 				<td><input id="actuator_lever_length" value=0></td>
 				<td class="unit">mm</td>
 			</tr><tr>
-				<th class="rowlabel">Actuator start torque</th>
+				<th class="rowlabel">Actuator start torque (air)</th>
 				<td><input id="actuator_start_torque" value=0></td>
 				<td class="unit">Nm</td>
 			</tr><tr>
-				<th class="rowlabel">Actuator end torque</th>
+				<th class="rowlabel">Actuator end torque (air)</th>
 				<td><input id="actuator_end_torque" value=0></td>
 				<td class="unit">Nm</td>
 			</tr><tr>
