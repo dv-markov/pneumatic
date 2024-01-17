@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+<link rel="stylesheet" href="style.css"> 
+<script type="text/javascript" src="specs.js"></script>
+<script type="text/javascript">
+	var poschart = null, poschart_options = null;
+
+	google.charts.load('current', {'packages':['corechart', 'scatter', 'line']});
+    google.charts.setOnLoadCallback(drawStuff);
+
+
+    direction_push = true;
+    function setDirection(push) {
+    	direction_push = push;
+    	document.getElementById('direction_push').disabled = push;
+    	document.getElementById('direction_pull').disabled = !push;
+
+    	compute(true);
+    }
+
+    function drawStuff() {
+      poschart = new google.visualization.LineChart(document.getElementById('poschart_div'));
+      var poschartDiv = document.getElementById('poschart_div');
+
+      poschart_options = {
+          backgroundColor: { fill:'transparent' },
+          curveType: 'function',
+          legend: {position: 'top'},
+          vAxes: {
+          	//0: {title: 'Linear Velocity (m/s)'},
+          	0: {title: 'Linear Position (m)'},
+          	1: {title: 'Cylinder Inst. Pressure (kPa)'}
+          	//3: {title: 'Temperature'},
+          	//4: {title: 'Mass'}
+          },
+          series: {
+          	//0: {targetAxisIndex: 1},
+          	0: {targetAxisIndex: 0},
+          	1: {targetAxisIndex: 1}
+          	//3: {targetAxisIndex: 0},
+          	//4: {targetAxisIndex: 1}
+          },
+          vAxis: {
+	          viewWindow: {
+	            min: 0
+	          }
+	        }
+
+      };
+
+      var posdata = new google.visualization.DataTable();
+      posdata.addColumn('number', 'Time (s)');
+      posdata.addColumn('number', 'Linear Position (m)');
+      posdata.addColumn('number', 'Cylinder Inst. Pressure (kPa)');
+      posdata.addRows([]);
+
+      poschart.draw(posdata, poschart_options);
+    };
+
+	function get_motor_data(motor,key){
+		return motor_data[motor][key];
+	}
+
+	function gidv(id) {
+		return eval(document.getElementById(id).value);
+	}
+
+	function thload() {
+		drawStuff();
+
+		setDirection(true);
+		
+
+		var inputs, index;
+
+		inputs = document.getElementsByTagName('input');
+		for (index = 0; index < inputs.length; ++index) {
+		    inputs[index].onkeyup = function(e) {
+		    	var key = e.keyCode ? e.keyCode : e.which;
+
+		    	if (key==13) {
+		    		compute(true);
+		    	} else {
+		    		compute(false);
+		    	}
+		    }
+		}
+	}
+
+		
+	function sign(x) {
+		if (x>0) return 1;
+		if (x<0) return -1;
+		return 0;
+	}
+
+	function compute(simulate) {
+		simulate = typeof simulate !== 'undefined' ? simulate : true;
+
+		// Constants
+		dt = 0.0005;
+		P_atm = 101e3;
+		R = 286.69; // J/kg-K
+		c_p = 1010; // J/kg-K
+		c_v = c_p - R;
+		// Add-DM
+		x_t_valve = 0.7;
+		gamma_air = 1.4;
+		rho_0 = 1000; // kg/m3
+		delta_p_0 = 100000; // Pa
+
+		// Variables
+		T_in = gidv('T_src') + 273; // K
+		P_in = gidv('P_src')*1000+P_atm; //Pa; 60psi (conversion between gague and abs pressure)
+		A = (Math.pow(gidv('d_bore')/1000,2)-
+					(direction_push ? 0 : Math.pow(gidv('d_rod')/1000,2)))*Math.PI/4; // m^2
+		xf = gidv('stroke')/1000; // m
+		
+		// d_line = gidv('d_line')/1000;
+		// l_line = gidv('l_line');
+		// V_extra = Math.PI/4*Math.pow(d_line,2)*l_line;
+		V_extra = gidv('dead_volume')/1000; // m3
+		M = gidv('mass'); // kg
+		// Add-DM
+		kv_total = gidv('kv_total')/3600; // m^3/s
+		delta_p_max = x_t_valve * gamma_air * P_in / 1.4; // Pa
+
+		// State variables (autocomputed)
+		t = 0;
+		T_s = T_in;
+		x = 0;
+		v = 0;
+		m_s = P_atm*V_extra/R/T_s; // rho = 1.2 kg/m^3
+		rho_in = P_in / (R * T_in);
+
+		data = [];
+		chartdata = [];
+
+		var posdata = new google.visualization.DataTable();
+		posdata.addColumn('number', 'Time (s)');
+      	//posdata.addColumn('number', 'Linear Velocity (m/s)');
+      	posdata.addColumn('number', 'Linear Position (m)');
+      	posdata.addColumn('number', 'Cylinder Inst. Pressure (kPa)');
+      	//posdata.addColumn('number', 'Cylinder Inst. Temperature (K)');
+      	//posdata.addColumn('number', 'Cylinder Air Mass (kg)');
+      	
+      	i=0;
+		while(i<30000) {
+			P_s = m_s/(x*A+V_extra)*R*T_s;
+			// add-DM
+			delta_p_valve = P_in - P_s;
+			x_factor_valve = delta_p_valve / P_in;
+			expansion_factor = Math.max(2/3, (1-(1/3)*(1.4/gamma_air)*(x_factor_valve/x_t_valve)));
+
+			V_in = kv_total*expansion_factor*Math.pow((rho_0*Math.min(delta_p_valve, delta_p_max)/rho_in/delta_p_0), 1/2);
+
+			// V_in = sign(P_in-P_s)*0.0197862*Math.pow(Math.pow(d_line,5)*(P_in-P_atm)*Math.abs(P_in-P_s)/l_line, 20/37);
+			m_in = P_in/R/T_in*V_in;
+
+			F = eval(document.getElementById('load').value); // N
+			//console.log(F);
+
+			dT_s = (-c_p*T_s*m_in - P_s*A*v + m_in*c_v*T_in)/c_p/m_s;
+			dm_s = m_in;
+
+			dx = v;
+			// add-DM - friction force
+			F_static_friction = F;
+			F_spring = eval(document.getElementById('spring_factor_force').value);
+			F_pressure_spring = (P_s-P_atm)*A - F;
+			// F_delta = F_pressure_spring-F_static_friction;
+			// F_result = Math.max((F_pressure_spring-F_static_friction), 0);
+			if ((Math.abs(F_pressure_spring) - F_static_friction) > 0) {
+				F_result = F_pressure_spring-F_static_friction;
+			} else {
+				F_result = 0;
+			}
+			dv = F_result / M;
+
+			// dv = ((P_s-P_atm)*A-F) / M;
+
+			t += dt;
+			x += dx*dt;
+			v += dv*dt;
+			if (x <= 0) {x = 0; v = Math.max(v,0);}
+			if (x >= xf) {x = xf; v = 0}
+			T_s += dT_s*dt;
+			m_s += dm_s*dt;
+
+			if (x >= xf && P_s >= P_in)
+				break;
+
+			chartdata.push([t,x,(P_s-P_atm)/1000]); //,T_s,m_s
+			i++;
+		}
+
+		posdata.addRows(chartdata);
+
+		poschart.draw(posdata, poschart_options);
+      	document.getElementById('charts').style.background='transparent';
+	}
+
+
+	function NaNto1(x) {
+		if (isNaN(x))
+			return 1;
+		return x;
+	}
+
+</script>
+
+<html>
+<body onload="thload();">
+	<div style="width: 420px; float: left;" class="container">
+		<h3>SAMSON Pneumatic Actuator <br> Stroke Time Calculation</h3>
+
+		<div class="odd">
+		<table>
+			<tr>
+				<th class='rowlabel'>Supply Air Pressure</th>
+				<td><input id='P_src' value=400></td>
+				<td class='unit'>kPa</td>
+			</tr><tr>
+				<th class="rowlabel">Supply Air Temperature</th>
+				<td><input id="T_src" value=20></td>
+				<td class="unit">C</td>
+			</tr><tr>
+				<th class="rowlabel">Kv Accessories Total</th>
+				<td><input id="kv_total" value=1></td>
+				<td class="unit">m3/h</td>
+			</tr><tr>
+				<th class="rowlabel">Actuator Dead Volume</th>
+				<td><input id="dead_volume" value=10></td>
+				<td class="unit">liter</td>
+			</tr><tr>
+				<th class="rowlabel">Actuator Piston Diameter</th>
+				<td><input id="d_bore" value=50></td>
+				<td class="unit">mm</td>
+			</tr><tr>
+				<th class="rowlabel">Rod Diameter</th>
+				<td><input id="d_rod" value=10></td>
+				<td class="unit">mm</td>
+			</tr><tr>
+				<th class="rowlabel">Direction</th>
+				<td colspan=2><button id="direction_push" onclick="setDirection(true)" disabled >PUSH</button>
+					<button id="direction_pull" onclick="setDirection(false)" >PULL</button></td>
+			</tr><tr>
+				<th class="rowlabel">Stroke</th>
+				<td><input id="stroke" value=100></td>
+				<td class="unit">mm</td>
+			</tr><tr>
+				<th class="rowlabel">Load</th>
+				<td><input id="load" value="150"></td>
+				<td class="unit">N</td>
+			</tr><tr>
+				<th class="rowlabel">Spring factor</th>
+				<td><input id="spring_factor_force" value="700*x"></td>
+				<td class="unit">N</td>
+			</tr><tr>
+				<th class="rowlabel">Piston+Rod Mass</th>
+				<td><input id="mass" value=5></td>
+				<td class="unit">kg</td>
+			</tr>
+		</table>
+	</div>
+	</div><div style="margin-left: 0px;" class="container" id="charts">
+	 <div id="poschart_div" style="width: 900px; height: 500px"></div>
+	</div>
+</body>
+</html>
