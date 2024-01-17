@@ -29,14 +29,16 @@
           vAxes: {
           	//0: {title: 'Linear Velocity (m/s)'},
           	0: {title: 'Linear Position (m)'},
-          	1: {title: 'Cylinder Inst. Pressure (kPa)'}
+          	1: {title: 'Cylinder Inst. Pressure (kPa)'},
+			// 2: {title: 'Actuator Force (N)'}
           	//3: {title: 'Temperature'},
           	//4: {title: 'Mass'}
           },
           series: {
           	//0: {targetAxisIndex: 1},
           	0: {targetAxisIndex: 0},
-          	1: {targetAxisIndex: 1}
+          	1: {targetAxisIndex: 1},
+			// 2: {targetAxisIndex: 2}
           	//3: {targetAxisIndex: 0},
           	//4: {targetAxisIndex: 1}
           },
@@ -52,14 +54,11 @@
       posdata.addColumn('number', 'Time (s)');
       posdata.addColumn('number', 'Linear Position (m)');
       posdata.addColumn('number', 'Cylinder Inst. Pressure (kPa)');
+	//   posdata.addColumn('number', 'Actuator Force (N)');
       posdata.addRows([]);
 
       poschart.draw(posdata, poschart_options);
     };
-
-	function get_motor_data(motor,key){
-		return motor_data[motor][key];
-	}
 
 	function gidv(id) {
 		return eval(document.getElementById(id).value);
@@ -98,7 +97,7 @@
 		simulate = typeof simulate !== 'undefined' ? simulate : true;
 
 		// Constants
-		dt = 0.0005;
+		dt = 0.00005;
 		P_atm = 101e3;
 		R = 286.69; // J/kg-K
 		c_p = 1010; // J/kg-K
@@ -125,6 +124,26 @@
 		kv_total = gidv('kv_total')/3600; // m^3/s
 		delta_p_max = x_t_valve * gamma_air * P_in / 1.4; // Pa
 
+		//stats
+		total_actuator_volume = Math.round((A * xf + V_extra) * 1000 * 100) / 100;
+		document.getElementById("total_volume").value = total_actuator_volume;
+		actuator_lever_length = Math.round(gidv('d_bore') / 2);
+		document.getElementById("actuator_lever_length").value = actuator_lever_length;
+		F = gidv('load'); // N
+		F_static_friction = F;
+		x = 0
+		F_spring_start = gidv('spring_factor_force');
+		console.log(F_spring_start);
+		x = xf;
+		F_spring_end = gidv('spring_factor_force');
+		console.log(F_spring_end);
+		actuator_start_torque = Math.round((P_in * A - F_spring_start) * actuator_lever_length/1000);
+		document.getElementById("actuator_start_torque").value = actuator_start_torque;
+		actuator_end_torque = Math.round((P_in * A - F_spring_end) * actuator_lever_length/1000);
+		document.getElementById("actuator_end_torque").value = actuator_end_torque;
+		actuator_da_torque = Math.round((P_in * A) * actuator_lever_length/1000);
+		document.getElementById("actuator_da_torque").value = actuator_da_torque;
+
 		// State variables (autocomputed)
 		t = 0;
 		T_s = T_in;
@@ -141,11 +160,12 @@
       	//posdata.addColumn('number', 'Linear Velocity (m/s)');
       	posdata.addColumn('number', 'Linear Position (m)');
       	posdata.addColumn('number', 'Cylinder Inst. Pressure (kPa)');
+		// posdata.addColumn('number', 'Actuator Force (N)');
       	//posdata.addColumn('number', 'Cylinder Inst. Temperature (K)');
       	//posdata.addColumn('number', 'Cylinder Air Mass (kg)');
       	
       	i=0;
-		while(i<30000) {
+		while(i<200000) {
 			P_s = m_s/(x*A+V_extra)*R*T_s;
 			// add-DM
 			delta_p_valve = P_in - P_s;
@@ -167,7 +187,7 @@
 			// add-DM - friction force
 			F_static_friction = F;
 			F_spring = eval(document.getElementById('spring_factor_force').value);
-			F_pressure_spring = (P_s-P_atm)*A - F;
+			F_pressure_spring = (P_s-P_atm)*A - F_spring;
 			// F_delta = F_pressure_spring-F_static_friction;
 			// F_result = Math.max((F_pressure_spring-F_static_friction), 0);
 			if ((Math.abs(F_pressure_spring) - F_static_friction) > 0) {
@@ -190,7 +210,9 @@
 			if (x >= xf && P_s >= P_in)
 				break;
 
-			chartdata.push([t,x,(P_s-P_atm)/1000]); //,T_s,m_s
+			if (i%100 == 0) {
+				chartdata.push([t,x,(P_s-P_atm)/1000]); //,T_s,m_s
+			}
 			i++;
 		}
 
@@ -226,15 +248,15 @@
 				<td class="unit">C</td>
 			</tr><tr>
 				<th class="rowlabel">Kv Accessories Total</th>
-				<td><input id="kv_total" value=1></td>
+				<td><input id="kv_total" value=0.5></td>
 				<td class="unit">m3/h</td>
 			</tr><tr>
 				<th class="rowlabel">Actuator Dead Volume</th>
-				<td><input id="dead_volume" value=10></td>
+				<td><input id="dead_volume" value=1></td>
 				<td class="unit">liter</td>
 			</tr><tr>
 				<th class="rowlabel">Actuator Piston Diameter</th>
-				<td><input id="d_bore" value=50></td>
+				<td><input id="d_bore" value=194></td>
 				<td class="unit">mm</td>
 			</tr><tr>
 				<th class="rowlabel">Rod Diameter</th>
@@ -246,21 +268,47 @@
 					<button id="direction_pull" onclick="setDirection(false)" >PULL</button></td>
 			</tr><tr>
 				<th class="rowlabel">Stroke</th>
-				<td><input id="stroke" value=100></td>
+				<td><input id="stroke" value=340></td>
 				<td class="unit">mm</td>
 			</tr><tr>
 				<th class="rowlabel">Load</th>
-				<td><input id="load" value="150"></td>
+				<td><input id="load" value="1000"></td>
 				<td class="unit">N</td>
 			</tr><tr>
 				<th class="rowlabel">Spring factor</th>
-				<td><input id="spring_factor_force" value="700*x"></td>
+				<td><input id="spring_factor_force" value="6000+8000*x"></td>
 				<td class="unit">N</td>
 			</tr><tr>
 				<th class="rowlabel">Piston+Rod Mass</th>
-				<td><input id="mass" value=5></td>
+				<td><input id="mass" value=10></td>
 				<td class="unit">kg</td>
+			<!-- </tr><tr>
+				<th class="rowlabel">Valve torque BTO</th>
+				<td><input id="valve_torque_bto" value=330></td>
+				<td class="unit">Nm</td> -->
 			</tr>
+				<th class="rowlabel">Stats</th>
+			</tr><tr>
+				<th class="rowlabel">Actuator Volume at full stroke</th>
+				<td><input id="total_volume" value=0 readonly="true"></td>
+				<td class="unit">liter</td>
+			</tr><tr>
+				<th class="rowlabel">Actuator lever length</th>
+				<td><input id="actuator_lever_length" value=0></td>
+				<td class="unit">mm</td>
+			</tr><tr>
+				<th class="rowlabel">Actuator start torque</th>
+				<td><input id="actuator_start_torque" value=0></td>
+				<td class="unit">Nm</td>
+			</tr><tr>
+				<th class="rowlabel">Actuator end torque</th>
+				<td><input id="actuator_end_torque" value=0></td>
+				<td class="unit">Nm</td>
+			</tr><tr>
+				<th class="rowlabel">Actuator DA torque</th>
+				<td><input id="actuator_da_torque" value=0></td>
+				<td class="unit">Nm</td>
+		</tr>
 		</table>
 	</div>
 	</div><div style="margin-left: 0px;" class="container" id="charts">
