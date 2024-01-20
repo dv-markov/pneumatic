@@ -111,6 +111,12 @@ select, input {
   visibility: visible;
   opacity: 1;
 }
+.deactivated {
+	background-color: #eeeae4;
+} 
+.table-header {
+	text-align: right;
+}
 </style>
 
 <script type="text/javascript">
@@ -239,7 +245,7 @@ select, input {
 		//stats
 		total_actuator_volume = Math.round((A * xf + V_extra) * 1000 * 100) / 100;
 		document.getElementById("total_volume").value = total_actuator_volume;
-		actuator_lever_length = Math.round(gidv('d_bore') / 2);
+		actuator_lever_length = Math.round(gidv('d_bore') / 2.89);
 		document.getElementById("actuator_lever_length").value = actuator_lever_length;
 		F = gidv('load'); // N
 		F_static_friction = F;
@@ -409,7 +415,7 @@ select, input {
 				<td><input id="valve_torque_bto" value=330></td>
 				<td class="unit">Nm</td>
 			</tr>
-				<th class="rowlabel">Stats</th>
+				<td><h4 class="table-header">Stats</h4></td>
 			</tr><tr>
 				<th class="rowlabel">Actuator Volume at full stroke</th>
 				<td><input id="total_volume" value=0 readonly="true"></td>
@@ -424,11 +430,11 @@ select, input {
 				<td class="unit">Nm</td>
 			</tr><tr>
 				<th class="rowlabel">Actuator end torque (air)</th>
-				<td><input id="actuator_end_torque" value=0></td>
+				<td><input class="deactivated" disabled="true" id="actuator_end_torque" value=0></td>
 				<td class="unit">Nm</td>
 			</tr><tr>
 				<th class="rowlabel">Actuator DA torque</th>
-				<td><input id="actuator_da_torque" value=0></td>
+				<td><input class="deactivated" disabled="true" id="actuator_da_torque" value=0></td>
 				<td class="unit">Nm</td>
 		</tr>
 		</table>
