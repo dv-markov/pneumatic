@@ -215,7 +215,7 @@ select, input {
 		simulate = typeof simulate !== 'undefined' ? simulate : true;
 
 		// Constants
-		dt = 0.00005;
+		dt = 1e-5;
 		P_atm = 101e3;
 		R = 286.69; // J/kg-K
 		c_p = 1010; // J/kg-K
@@ -228,7 +228,7 @@ select, input {
 
 		// Variables
 		T_in = gidv('T_src') + 273; // K
-		P_in = gidv('P_src')*1000+P_atm; //Pa; 60psi (conversion between gague and abs pressure)
+		P_in = gidv('P_src')*100_000+P_atm; //Pa; 60psi (conversion between gague and abs pressure)
 		A = (Math.pow(gidv('d_bore')/1000,2)-
 					(direction_push ? 0 : Math.pow(gidv('d_rod')/1000,2)))*Math.PI/4; // m^2
 		xf = gidv('stroke')/1000; // m
@@ -286,7 +286,7 @@ select, input {
       	//posdata.addColumn('number', 'Cylinder Air Mass (kg)');
       	
       	i=0;
-		while(i<200000) {
+		while(i<Math.round(1.5e6)) {
 			P_s = m_s/(x*A+V_extra)*R*T_s;
 			// add-DM
 			delta_p_valve = P_in - P_s;
@@ -303,10 +303,10 @@ select, input {
 			relative_travel = x / xf;
 			valve_torque_factor = 1.5 * Math.pow(relative_travel, 2) - 1.75 * relative_travel + 1;
 			F_valve = F_valve_BTO * valve_torque_factor;
-			if (i%1000 == 0) {
-				console.log(relative_travel);
-				console.log(F_valve);
-			}
+			// if (i%1000 == 0) {
+			// 	console.log(relative_travel);
+			// 	console.log(F_valve);
+			// }
 
 			dT_s = (-c_p*T_s*m_in - P_s*A*v + m_in*c_v*T_in)/c_p/m_s;
 			dm_s = m_in;
@@ -338,7 +338,7 @@ select, input {
 			if (x >= xf && P_s >= P_in)
 				break;
 
-			if (i%100 == 0) {
+			if (i%1000 == 0) {
 				chartdata.push([t,x,(P_s-P_atm)/1000]); //,T_s,m_s
 			}
 			i++;
@@ -367,33 +367,68 @@ select, input {
 		<div class="odd">
 		<table>
 			<tr>
-				<th class='rowlabel'>Supply Air Pressure</th>
-				<td><input id='P_src' value=400></td>
-				<td class='unit'>kPa</td>
+			<!-- General data -->
+				<th><h4 class="table-header">General Data</h4></th>
 			</tr><tr>
-				<th class="rowlabel">Supply Air Temperature</th>
+				<th class='rowlabel'>Supply Air Pressure, Ps</th>
+				<td><input id='P_src' value=4.0></td>
+				<td class='unit'>bar</td>
+			</tr><tr>
+				<th class="rowlabel">Supply Air Temperature, Ts</th>
 				<td><input id="T_src" value=20></td>
 				<td class="unit">C</td>
 			</tr><tr>
-				<th class="rowlabel">Kv Accessories Total</th>
+				<th class="rowlabel">Line Total Kv</th>
 				<td><input id="kv_total" value=0.5></td>
 				<td class="unit">m3/h</td>
+			</tr><tr>
+			<!-- Actuator data -->
+				<th><h4 class="table-header">Actuator Data</h4></th>
+			</tr><tr>
+				<th class="rowlabel">Model</th>
+				<td><input id="act_model" value="VT240 S06"></td>
+			</tr><tr>
+				<th class="rowlabel">DA Torque @ Ps</th>
+				<td><input id="act_m_da" value=1508></td>
+				<td class="unit">Nm</td>
+			</tr><tr>
+				<th class="rowlabel">Start Spring Torque</th>
+				<td><input id="act_m_spring_start" value=664.8></td>
+				<td class="unit">Nm</td>
+			</tr><tr>
+				<th class="rowlabel">End Spring Torque</th>
+				<td><input id="act_m_spring_end" value=492.6></td>
+				<td class="unit">Nm</td>
+			</tr><tr>
+				<th class="rowlabel">Full Cylinder Volume</th>
+				<td><input id="act_full_volume" value=11.40></td>
+				<td class="unit">l</td>
+			</tr><tr>
+				<th class="rowlabel">Weight</th>
+				<td><input id="act_weight" value=77.76></td>
+				<td class="unit">kg</td>
+			</tr><tr>
+			<!-- Valve data -->
+				<th><h4 class="table-header">Valve Data</h4></th>
+			</tr><tr>
+				<th class="rowlabel">Valve torque BTO</th>
+				<td><input id="valve_torque_bto" value=330></td>
+				<td class="unit">Nm</td>
+			</tr><tr>
+			<!-- Advanced Data / Stats -->
+				<td><h4 class="table-header">Advanced Data / Stats</h4></td>
 			</tr><tr>
 				<th class="rowlabel">Actuator Dead Volume</th>
 				<td><input id="dead_volume" value=1></td>
 				<td class="unit">liter</td>
 			</tr><tr>
 				<th class="rowlabel">Actuator Piston Diameter</th>
-				<td><input id="d_bore" value=194></td>
+				<td><input id="d_bore" value=240></td>
 				<td class="unit">mm</td>
 			</tr><tr>
 				<th class="rowlabel">Rod Diameter</th>
 				<td><input id="d_rod" value=10></td>
 				<td class="unit">mm</td>
-			</tr><tr>
-				<th class="rowlabel">Direction</th>
-				<td colspan=2><button id="direction_push" onclick="setDirection(true)" disabled >PUSH</button>
-					<button id="direction_pull" onclick="setDirection(false)" >PULL</button></td>
 			</tr><tr>
 				<th class="rowlabel">Stroke</th>
 				<td><input id="stroke" value=340></td>
@@ -410,12 +445,6 @@ select, input {
 				<th class="rowlabel">Piston+Rod Mass</th>
 				<td><input id="mass" value=10></td>
 				<td class="unit">kg</td>
-			</tr><tr>
-				<th class="rowlabel">Valve torque BTO</th>
-				<td><input id="valve_torque_bto" value=330></td>
-				<td class="unit">Nm</td>
-			</tr>
-				<td><h4 class="table-header">Stats</h4></td>
 			</tr><tr>
 				<th class="rowlabel">Actuator Volume at full stroke</th>
 				<td><input id="total_volume" value=0 readonly="true"></td>
@@ -436,7 +465,11 @@ select, input {
 				<th class="rowlabel">Actuator DA torque</th>
 				<td><input class="deactivated" disabled="true" id="actuator_da_torque" value=0></td>
 				<td class="unit">Nm</td>
-		</tr>
+			</tr><tr>
+				<th class="rowlabel">Direction</th>
+				<td colspan=2><button id="direction_push" onclick="setDirection(true)" disabled >PUSH</button>
+					<button id="direction_pull" onclick="setDirection(false)" >PULL</button></td>
+			</tr>
 		</table>
 	</div>
 	</div><div style="margin-left: 0px;" class="container" id="charts">
