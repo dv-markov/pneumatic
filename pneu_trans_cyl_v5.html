@@ -120,6 +120,10 @@ select, input {
 /* input[class="deact"] {
 	background-color: #eeeae4;
 } */
+label {
+  padding-right: 10px;
+  font-size: 1rem;
+}
 
 </style>
 
@@ -373,6 +377,7 @@ select, input {
 
 			if (i%1000 == 0) {
 				chartdata.push([t, x, (P_s-P_atm)/1000]); //,T_s,m_s
+				// document.getElementById("progress_bar").value = i / n_steps;
 				if (i%10000 == 0) {
 					console.log('Ход абс', x, 'Ход отн', xr, 'Момент на ТПА', valve_current_torque, 'Сила привода', F_result);
 				}	
@@ -453,7 +458,17 @@ select, input {
 				<td><input id="valve_torque_bto" value=330></td>
 				<td class="unit">N*m</td>
 			</tr>
-			<div class="deact">
+			<!-- <tr>
+				<td>
+				<h5 class="table-header">
+					<label for="progress_bar">Hit Enter to push the pressure:</label>
+				</h5>
+				</td>
+				<td>
+					<progress id="progress_bar" value=0></progress>
+				</td>
+			</tr> -->
+			<tr class="deact">
 				<tr>
 				<!-- Advanced Data / Stats -->
 					<td><h4 class="table-header">Advanced Data / Stats</h4></td>
@@ -530,9 +545,10 @@ select, input {
 				</tr>
 			</div>
 		</table>
+		</div>
 	</div>
-	</div><div style="margin-left: 0px;" class="container" id="charts">
-	 <div id="poschart_div" style="width: 900px; height: 500px"></div>
+	<div style="margin-left: 0px;" class="container" id="charts">
+	 	<div id="poschart_div" style="width: 900px; height: 500px"></div>
 	</div>
 </body>
 </html>
