@@ -150,10 +150,12 @@ select, input {
           vAxes: {
           	0: {title: 'Linear Position (m)'},
           	1: {title: 'Cylinder Inst. Pressure (kPa)'},
+			// 2: {title: 'Linear Velocity (m/s)'},
           },
           series: {
           	0: {targetAxisIndex: 0},
           	1: {targetAxisIndex: 1},
+			// 2: {targetAxisIndex: 1},
           },
           vAxis: {
 	          viewWindow: {
@@ -167,6 +169,7 @@ select, input {
       posdata.addColumn('number', 'Time (s)');
       posdata.addColumn('number', 'Linear Position (m)');
       posdata.addColumn('number', 'Cylinder Inst. Pressure (kPa)');
+	//   posdata.addColumn('number', 'Linear Velocity (m/s)');
       posdata.addRows([]);
 
       poschart.draw(posdata, poschart_options);
@@ -319,6 +322,7 @@ select, input {
 		posdata.addColumn('number', 'Time (s)');
         posdata.addColumn('number', 'Linear Position (m)');
       	posdata.addColumn('number', 'Cylinder Inst. Pressure (kPa)');
+		// posdata.addColumn('number', 'Linear Velocity (m/s)');
 
 		t_stroke = 0;
       	i=0;
@@ -368,7 +372,7 @@ select, input {
 				break;
 
 			if (i%1000 == 0) {
-				chartdata.push([t,x,(P_s-P_atm)/1000]); //,T_s,m_s
+				chartdata.push([t, x, (P_s-P_atm)/1000]); //,T_s,m_s
 				if (i%10000 == 0) {
 					console.log('Ход абс', x, 'Ход отн', xr, 'Момент на ТПА', valve_current_torque, 'Сила привода', F_result);
 				}	
