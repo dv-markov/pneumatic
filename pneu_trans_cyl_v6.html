@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<!-- Necessary to consider pressure from the other side of the cylinder, css moved to css folder -->
+<script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+<link rel="stylesheet" href="./css/style.css"> 
+
+<script type="text/javascript">
+	var poschart = null, poschart_options = null;
+
+	google.charts.load('current', {'packages':['corechart', 'scatter', 'line']});
+    google.charts.setOnLoadCallback(drawStuff);
+
+
+    direction_push = true;
+    // function setDirection(push) {
+    // 	direction_push = push;
+    // 	document.getElementById('direction_push').disabled = push;
+    // 	document.getElementById('direction_pull').disabled = !push;
+
+    // 	compute(true);
+    // }
+
+    function drawStuff() {
+      poschart = new google.visualization.LineChart(document.getElementById('poschart_div'));
+      var poschartDiv = document.getElementById('poschart_div');
+
+      poschart_options = {
+          backgroundColor: { fill:'transparent' },
+          curveType: 'function',
+          legend: {position: 'top'},
+          vAxes: {
+          	0: {title: 'Linear Position (m)'},
+          	1: {title: 'Cylinder Inst. Pressure (kPa)'},
+			// 2: {title: 'Linear Velocity (m/s)'},
+          },
+          series: {
+          	0: {targetAxisIndex: 0},
+          	1: {targetAxisIndex: 1},
+			// 2: {targetAxisIndex: 1},
+          },
+          vAxis: {
+	          viewWindow: {
+	            min: 0
+	          }
+	        }
+
+      };
+
+      var posdata = new google.visualization.DataTable();
+      posdata.addColumn('number', 'Time (s)');
+      posdata.addColumn('number', 'Linear Position (m)');
+      posdata.addColumn('number', 'Cylinder Inst. Pressure (kPa)');
+	//   posdata.addColumn('number', 'Linear Velocity (m/s)');
+      posdata.addRows([]);
+
+      poschart.draw(posdata, poschart_options);
+    };
+
+	function gidv(id) {
+		return eval(document.getElementById(id).value);
+	}
+
+	function thload() {
+		drawStuff();
+
+		// setDirection(true);
+		
+
+		var inputs, index;
+
+		inputs = document.getElementsByTagName('input');
+		for (index = 0; index < inputs.length; ++index) {
+		    inputs[index].onkeyup = function(e) {
+		    	var key = e.keyCode ? e.keyCode : e.which;
+
+		    	if (key==13) {
+		    		compute(true);
+		    	} 
+				// else {
+		    	// 	compute(false);
+		    	// }
+		    }
+		}
+	}
+
+		
+	function sign(x) {
+		if (x>0) return 1;
+		if (x<0) return -1;
+		return 0;
+	}
+
+	function compute(simulate) {
+		simulate = typeof simulate !== 'undefined' ? simulate : true;
+
+		// Constants
+		// dt = 1e-4;
+		dt = gidv("step_size");
+		n_steps = Math.round(gidv("n_steps"));
+		P_atm = 101e3;
+		R = 286.69; // J/kg-K
+		c_p = 1010; // J/kg-K
+		c_v = c_p - R;
+		// Add-DM
+		x_t_valve = 0.7;
+		gamma_air = 1.4;
+		rho_0 = 1000; // kg/m3
+		delta_p_0 = 100_000; // Pa
+		pi = Math.PI
+
+		// Variables
+		// General data
+		T_in = gidv('T_src') + 273; // K
+		P_in = gidv('P_src')*100_000+P_atm; //Pa
+		kv_total = gidv('kv_total')/3600; // m^3/s
+		// Actuator data
+		act_torque_da = gidv("act_torque_da"); // N*m
+		act_torque_spring_start = gidv("act_torque_spring_start"); // N*m
+		act_torque_spring_end = gidv("act_torque_spring_end"); // N*m
+		act_total_volume = gidv("act_total_volume") / 1000; // m3
+		act_weight = gidv("act_weight");
+		// Valve data
+		valve_torque_bto = gidv("valve_torque_bto");
+		// Advanced data - calculated values
+		alfa = gidv("act_piston_lever_ratio");
+		if (alfa == 0) {
+			alfa = 2.89;
+			document.getElementById("act_piston_lever_ratio").value = alfa;
+		}
+		act_piston_diameter = gidv("act_piston_diameter")/1000; // m
+		if (act_piston_diameter == 0) {
+			act_piston_diameter = Math.pow((4*alfa*act_torque_da/pi/(P_in-P_atm)), 1/3);
+			document.getElementById("act_piston_diameter").value = Math.round(act_piston_diameter*1000);
+		}
+		else {
+			alfa = (P_in-P_atm)*pi*Math.pow(act_piston_diameter, 3)/4/act_torque_da;
+			document.getElementById("act_piston_lever_ratio").value = Math.round(alfa*100)/100;
+		}
+		A = pi * Math.pow(act_piston_diameter, 2) / 4; // m2
+		document.getElementById("act_piston_surface").value = Math.round(A*10000);
+		act_lever_length = gidv("act_lever_length")/1000; // m
+		if (act_lever_length == 0) {
+			// act_lever_length = act_piston_diameter / alfa;
+			act_lever_length = act_torque_da / (P_in-P_atm) / A;
+			document.getElementById("act_lever_length").value = Math.round(act_lever_length*1000);
+		}
+		act_dead_volume = gidv("act_dead_volume") / 1000;
+		if (act_dead_volume == 0) {
+			act_dead_volume = act_total_volume * 0.1;
+			document.getElementById("act_dead_volume").value = Math.round(act_dead_volume*1000*100)/100;
+		}
+		document.getElementById("act_operating_volume").value = Math.round((act_total_volume - act_dead_volume)*1000*100)/100;
+		act_stroke = gidv("act_stroke") / 1000; // m 
+		if (act_stroke == 0) {
+			act_stroke = (act_total_volume - act_dead_volume) / A;
+			document.getElementById("act_stroke").value = Math.round(act_stroke*1000);
+		}
+		act_spring_force_relaxed = gidv("act_spring_force_relaxed"); // N
+		if (act_spring_force_relaxed == 0) {
+			act_spring_force_relaxed = act_torque_spring_end / act_stroke;
+			document.getElementById("act_spring_force_relaxed").value = Math.round(act_spring_force_relaxed);
+		}
+		act_spring_force_comp_factor = gidv("act_spring_force_comp_factor"); // N/m
+		if (act_spring_force_comp_factor == 0) {
+			act_spring_force_comp_factor = (act_torque_spring_start - act_torque_spring_end) / act_stroke / act_lever_length;
+			document.getElementById("act_spring_force_comp_factor").value = Math.round(act_spring_force_comp_factor);
+		}
+		act_friction_force = gidv("act_friction_force"); // N
+		if (act_friction_force == 0) {
+			act_friction_force = act_spring_force_relaxed * 0.2;
+			document.getElementById("act_friction_force").value = Math.round(act_friction_force);
+		}
+		M = gidv('mass'); // kg
+		if (M == 0) {
+			M = act_weight * 0.3;
+			document.getElementById("mass").value = Math.round(M);
+		}
+		act_torque_air_start = act_torque_da - act_torque_spring_end; // N*m
+		document.getElementById("act_torque_air_start").value = Math.round(act_torque_air_start);
+		act_torque_air_end = act_torque_da - act_torque_spring_start; // N*m
+		document.getElementById("act_torque_air_end").value = Math.round(act_torque_air_end);
+
+
+		// Calculated values
+		piston_diameter = act_piston_diameter;
+		V_extra = act_dead_volume; // m3
+		xf = act_stroke; // m
+		// Add-DM
+		delta_p_max = x_t_valve * gamma_air * P_in / 1.4; // Pa
+
+		// State variables (autocomputed)
+		t = 0;
+		T_s = T_in;
+		x = 0;
+		v = 0;
+		m_s = P_atm*V_extra/R/T_s; 
+		rho_in = P_in / (R * T_in);
+
+		data = [];
+		chartdata = [];
+
+		var posdata = new google.visualization.DataTable();
+		posdata.addColumn('number', 'Time (s)');
+        posdata.addColumn('number', 'Linear Position (m)');
+      	posdata.addColumn('number', 'Cylinder Inst. Pressure (kPa)');
+		// posdata.addColumn('number', 'Linear Velocity (m/s)');
+
+		t_stroke = 0;
+      	i=0;
+	
+		while(i < n_steps) {
+			P_s = m_s/(x*A+V_extra)*R*T_s;
+			// add-DM
+			delta_p_valve = P_in - P_s;
+			x_factor_valve = delta_p_valve / P_in;
+			expansion_factor = Math.max(2/3, (1-(1/3)*(1.4/gamma_air)*(x_factor_valve/x_t_valve)));
+
+			Q_V_in = kv_total*expansion_factor*Math.pow((rho_0*Math.min(delta_p_valve, delta_p_max)/rho_in/delta_p_0), 1/2);
+			Q_m_in = P_in / R / T_in * Q_V_in;
+
+			xr = x / xf; // relative travel
+			valve_torque_factor = eval(gidv("valve_torque_function"));
+			valve_current_torque = valve_torque_bto * valve_torque_factor;
+			F_valve = valve_current_torque / act_lever_length;
+
+			// add-DM - friction force
+			F_static_friction = act_friction_force + F_valve;
+			F_spring = act_spring_force_relaxed + act_spring_force_comp_factor * x;
+			F_pressure_spring = (P_s-P_atm)*A - F_spring;
+			if ((Math.abs(F_pressure_spring) - F_static_friction) > 0) {
+				F_result = F_pressure_spring-F_static_friction;
+			} else {
+				F_result = 0;
+			}
+			
+			dv = F_result / M;
+			dx = v;
+			dT_s = (-c_p*T_s*Q_m_in - P_s*A*v + Q_m_in*c_v*T_in)/c_p/m_s;
+			dm_s = Q_m_in;
+
+			t += dt;
+			x += dx*dt;
+			v += dv*dt;
+			if (x <= 0) {x = 0; v = Math.max(v,0);}
+			if (x >= xf) {
+				x = xf; v = 0; 
+				if (t_stroke == 0) {t_stroke = t;}
+			}
+			T_s += dT_s*dt;
+			m_s += dm_s*dt;
+
+			if (x >= xf && P_s >= P_in)
+				break;
+
+			if (i%1000 == 0) {
+				chartdata.push([t, x, (P_s-P_atm)/1000]); //,T_s,m_s
+				// document.getElementById("progress_bar").value = i / n_steps;
+				if (i%10000 == 0) {
+					console.log('Ход абс', x, 'Ход отн', xr, 'Момент на ТПА', valve_current_torque, 'Сила привода', F_result);
+				}	
+			}
+
+			i++;
+		}
+		console.log("Время хода ", t_stroke)
+
+		posdata.addRows(chartdata);
+
+		poschart.draw(posdata, poschart_options);
+      	document.getElementById('charts').style.background='transparent';
+	}
+
+
+	function NaNto1(x) {
+		if (isNaN(x))
+			return 1;
+		return x;
+	}
+
+</script>
+
+<html>
+<body onload="thload();">
+	<div style="width: 420px; float: left;" class="container">
+		<h3>SAMSON Pneumatic Actuator <br> Stroke Time Calculation</h3>
+
+		<div class="odd">
+		<table>
+			<tr>
+			<!-- General data -->
+				<th><h4 class="table-header">General Data</h4></th>
+			</tr><tr>
+				<th class='rowlabel'>Supply Air Pressure, Ps</th>
+				<td><input id='P_src' value=4.0></td>
+				<td class='unit'>bar</td>
+			</tr><tr>
+				<th class="rowlabel">Supply Air Temperature, Ts</th>
+				<td><input id="T_src" value=20></td>
+				<td class="unit">C</td>
+			</tr><tr>
+				<th class="rowlabel">Line Total Kv</th>
+				<td><input id="kv_total" value=0.5></td>
+				<td class="unit">m3/h</td>
+			</tr><tr>
+			<!-- Actuator data -->
+				<th><h4 class="table-header">Actuator Data</h4></th>
+			</tr><tr>
+				<th class="rowlabel">Model</th>
+				<td><input id="act_model" value="VT240 S06"></td>
+			</tr><tr>
+				<th class="rowlabel">DA Torque @ Ps</th>
+				<td><input id="act_torque_da" value=1508></td>
+				<td class="unit">N*m</td>
+			</tr><tr>
+				<th class="rowlabel">Start Spring Torque</th>
+				<td><input id="act_torque_spring_start" value=664.8></td>
+				<td class="unit">N*m</td>
+			</tr><tr>
+				<th class="rowlabel">End Spring Torque</th>
+				<td><input id="act_torque_spring_end" value=492.6></td>
+				<td class="unit">N*m</td>
+			</tr><tr>
+				<th class="rowlabel">Full Cylinder Volume</th>
+				<td><input id="act_total_volume" value=11.40></td>
+				<td class="unit">liter</td>
+			</tr><tr>
+				<th class="rowlabel">Weight</th>
+				<td><input id="act_weight" value=77.76></td>
+				<td class="unit">kg</td>
+			</tr><tr>
+			<!-- Valve data -->
+				<th><h4 class="table-header">Valve Data</h4></th>
+			</tr><tr>
+				<th class="rowlabel">Valve torque BTO</th>
+				<td><input id="valve_torque_bto" value=330></td>
+				<td class="unit">N*m</td>
+			</tr>
+			<!-- <tr>
+				<td>
+				<h5 class="table-header">
+					<label for="progress_bar">Hit Enter to push the pressure:</label>
+				</h5>
+				</td>
+				<td>
+					<progress id="progress_bar" value=0></progress>
+				</td>
+			</tr> -->
+			<tr class="deact">
+				<tr>
+				<!-- Advanced Data / Stats -->
+					<td><h4 class="table-header">Advanced Data / Stats</h4></td>
+				</tr><tr>
+					<th class="rowlabel">Actuator Piston Diameter</th>
+					<td><input id="act_piston_diameter" class="deactivated" value=0></td>
+					<td class="unit">mm</td>
+				</tr><tr>
+					<th class="rowlabel">Piston Surface</th>
+					<td><input id="act_piston_surface" class="deactivated" disabled="true" value=0></td>
+					<td class="unit">cm2</td>
+				</tr><tr>
+					<th class="rowlabel">Actuator lever length</th>
+					<td><input id="act_lever_length" class="deactivated" value=0></td>
+					<td class="unit">mm</td>
+				</tr><tr>
+					<th class="rowlabel">Piston / Lever ratio</th>
+					<td><input id="act_piston_lever_ratio" class="deactivated" value=2.89></td>
+					<td class="unit"></td>
+				</tr><tr>
+					<th class="rowlabel">Actuator Dead Volume</th>
+					<td><input id="act_dead_volume" class="deactivated" value=0></td>
+					<td class="unit">liter</td>
+				</tr><tr>
+					<th class="rowlabel">Actuator Operating Volume</th>
+					<td><input id="act_operating_volume" class="deactivated" disabled="true" value=0></td>
+					<td class="unit">liter</td>
+				</tr><tr>
+					<th class="rowlabel">Actuator Linear Stroke</th>
+					<td><input id="act_stroke" class="deactivated" value=0></td>
+					<td class="unit">mm</td>
+				</tr><tr>
+					<th class="rowlabel">Actuator Spring Force Relaxed</th>
+					<td><input id="act_spring_force_relaxed" class="deactivated" value=0></td>
+					<td class="unit">N</td>
+				</tr><tr>
+					<th class="rowlabel">Actuator Spring Force Compression Factor</th>
+					<td><input id="act_spring_force_comp_factor" class="deactivated" value=0></td>
+					<td class="unit">N/m</td>
+				</tr><tr>
+					<th class="rowlabel">Actuator Static Friction Force</th>
+					<td><input id="act_friction_force" class="deactivated" value=0></td>
+					<td class="unit">N</td>
+				</tr><tr>
+					<th class="rowlabel">Actuator Piston Mass</th>
+					<td><input id="mass" class="deactivated" value=0></td>
+					<td class="unit">kg</td>
+				</tr><tr>
+					<th class="rowlabel">Actuator start torque by air</th>
+					<td><input id="act_torque_air_start" class="deactivated" disabled="true" value=0></td>
+					<td class="unit">N*m</td>
+				</tr><tr>
+					<th class="rowlabel">Actuator end torque by air</th>
+					<td><input id="act_torque_air_end" class="deactivated" disabled="true" value=0></td>
+					<td class="unit">N*m</td>
+				</tr><tr>
+					<th class="rowlabel">Valve torque function, f(xr)</th>
+					<td><input id="valve_torque_function" class="deactivated" value="1-3.83*xr+13.65*xr**2-28.39*xr**3+33.51*xr**4-19.53*xr**5+4.34*xr**6"></td>
+				</tr><tr>
+					<th class="rowlabel">Step size</th>
+					<td><input id="step_size" class="deactivated" value="1e-5"></td>
+					<td class="unit">s</td>
+				</tr><tr>
+					<th class="rowlabel">N steps</th>
+					<td><input id="n_steps" class="deactivated" value="15e5"></td>
+				<!-- </tr><tr>
+					<th class="rowlabel">Actuator DA torque</th>
+					<td><input id="actuator_da_torque" class="deactivated" disabled="true" value=0></td>
+					<td class="unit">Nm</td> -->
+				<!-- </tr><tr>
+					<th class="rowlabel">Direction</th>
+					<td colspan=2><button id="direction_push" onclick="setDirection(true)" disabled >PUSH</button>
+					<button id="direction_pull" onclick="setDirection(false)" >PULL</button></td> -->
+				</tr>
+			</div>
+		</table>
+		</div>
+	</div>
+	<div style="margin-left: 0px;" class="container" id="charts">
+	 	<div id="poschart_div" style="width: 900px; height: 500px"></div>
+	</div>
+</body>
+</html>
